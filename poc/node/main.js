@@ -501,7 +501,7 @@ function readTrackerOutput(res, trackerOutputKey, successCallback, errorCallback
 	});
 }
 
-function allocateAdsForUser(res, entryId, adPositions, allocatedAds, adsToPrepare, callback) {
+function allocateAdsForUser(res, entryId, uid, adPositions, allocatedAds, adsToPrepare, callback) {
 	var newAllocatedAds = {};
 	var adsCount = adPositions.length;
 	// find which ads should be prepared
@@ -520,11 +520,12 @@ function allocateAdsForUser(res, entryId, adPositions, allocatedAds, adsToPrepar
 		res.log('requesting ad for user');
 		
 		// get via VAST
-		vastParser.getAdMediaFiles(res, adPositions[i].vastUrl, adPositions[i].adSlotDuration*1000, function(adUrl){
+		vastParser.getAdMediaFiles(res, adPositions[i].vastUrl, adPositions[i].adSlotDuration*1000, function(adUrl, trackingInfo){
 			if(adUrl){
 				var adId = md5(adUrl);
 				adsToPrepare.push({adUrl: adUrl, adId: adId, entryId: entryId});		
-				newAllocatedAds[adPosition.cuePointId] = adId;				
+				newAllocatedAds[adPosition.cuePointId] = adId;	
+				memcache.set('trackingInfo-' + adId + '-' + uid, trackingInfo, 600, function (err) {});
 			}
 			adsCount--;
 			if(adsCount == 0){
@@ -612,7 +613,7 @@ function processFlavorStitch(params, res) {
 		
 		var adsToPrepare = [];
 		
-		allocateAdsForUser(res, params.entryId, adPositions, allocatedAds, adsToPrepare, function(newAllocatedAds){
+		allocateAdsForUser(res, params.entryId, params.uid, adPositions, allocatedAds, adsToPrepare, function(newAllocatedAds){
 			memcache.set(allocatedAdsKey, JSON.stringify(newAllocatedAds), 3600, function (err) {});
 			// prepare the ads
 			prepareAdsForEntry(adsToPrepare);			
@@ -1089,6 +1090,9 @@ function processAdSegmentRedirect(queryParams, res) {
 			adId = 'none';
 		}
 
+		var trackingId = 'trackingInfo-' + adId + '-' + queryParams.uid;
+		vastParser.sendBeacon(res, trackingId, parseInt(queryParams.segmentIndex),parseInt(queryParams.outputStart), parseInt(queryParams.outputEnd), memcache); //TODO
+		
 		// update the query parameters
 		delete queryParams.uid;
 		queryParams['adId'] = adId;
